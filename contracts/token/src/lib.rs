@@ -32,6 +32,13 @@ pub struct AllowanceDataKey {
 
 #[contracttype]
 #[derive(Clone)]
+pub struct AllowanceValue {
+    pub amount: i128,
+    pub expiration_ledger: u32,
+}
+
+#[contracttype]
+#[derive(Clone)]
 pub enum MetadataKey {
     Name,
     Symbol,
@@ -200,7 +207,14 @@ impl TokenContract {
 impl token::Interface for TokenContract {
     fn allowance(env: Env, from: Address, spender: Address) -> i128 {
         let key = DataKey::Allowance(AllowanceDataKey { from, spender });
-        env.storage().temporary().get(&key).unwrap_or(0)
+        let val: AllowanceValue = match env.storage().temporary().get(&key) {
+            Some(v) => v,
+            None => return 0,
+        };
+        if env.ledger().sequence() > val.expiration_ledger {
+            return 0;
+        }
+        val.amount
     }
 
     fn approve(env: Env, from: Address, spender: Address, amount: i128, expiration_ledger: u32) {
@@ -211,7 +225,7 @@ impl token::Interface for TokenContract {
             spender: spender.clone(),
         });
 
-        env.storage().temporary().set(&key, &amount);
+        env.storage().temporary().set(&key, &AllowanceValue { amount, expiration_ledger });
         if expiration_ledger > env.ledger().sequence() {
             env.storage().temporary().extend_ttl(&key, expiration_ledger, expiration_ledger);
         }
@@ -234,18 +248,27 @@ impl token::Interface for TokenContract {
     fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
         spender.require_auth();
 
-        // Check allowance
-        let allowance = Self::allowance(env.clone(), from.clone(), spender.clone());
-        if allowance < amount {
-            panic!("Insufficient allowance");
-        }
-
-        // Update allowance
         let key = DataKey::Allowance(AllowanceDataKey {
             from: from.clone(),
             spender: spender.clone(),
         });
-        env.storage().temporary().set(&key, &(allowance - amount));
+
+        let val: AllowanceValue = env.storage().temporary()
+            .get(&key)
+            .unwrap_or(AllowanceValue { amount: 0, expiration_ledger: 0 });
+
+        if env.ledger().sequence() > val.expiration_ledger {
+            panic!("Allowance expired");
+        }
+        if val.amount < amount {
+            panic!("Insufficient allowance");
+        }
+
+        // Update allowance
+        env.storage().temporary().set(&key, &AllowanceValue {
+            amount: val.amount - amount,
+            expiration_ledger: val.expiration_ledger,
+        });
 
         // Perform transfer
         Self::transfer_impl(env, from, to, amount).unwrap();
