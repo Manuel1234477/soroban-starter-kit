@@ -49,6 +49,7 @@ pub enum EscrowError {
     AlreadyInitialized = 5,
     NotInitialized = 6,
     InsufficientFunds = 7,
+    InvalidAmount = 8,
 }
 
 #[contractimpl]
@@ -65,6 +66,10 @@ impl EscrowContract {
     ) -> Result<(), EscrowError> {
         if env.storage().instance().has(&DataKey::State) {
             return Err(EscrowError::AlreadyInitialized);
+        }
+
+        if amount <= 0 {
+            return Err(EscrowError::InvalidAmount);
         }
 
         // Verify deadline is in the future
