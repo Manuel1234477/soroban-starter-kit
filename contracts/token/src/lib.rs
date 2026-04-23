@@ -245,6 +245,16 @@ impl token::TokenInterface for TokenContract {
 
     pub fn approve(env: Env, from: Address, spender: Address, amount: i128, expiration_ledger: u32) {
         from.require_auth();
+
+        if expiration_ledger <= env.ledger().sequence() {
+            panic!("expiration_ledger must be in the future");
+        }
+
+        let key = DataKey::Allowance(AllowanceDataKey {
+            from: from.clone(),
+            spender: spender.clone(),
+        });
+
         let key = DataKey::Allowance(AllowanceDataKey { from: from.clone(), spender: spender.clone() });
         let key = Allowance(AllowanceDataKey { from: from.clone(), spender: spender.clone() });
         env.storage().temporary().set(&key, &amount);
