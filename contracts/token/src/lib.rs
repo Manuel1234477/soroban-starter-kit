@@ -47,6 +47,20 @@ pub enum DataKey {
 
 use soroban_sdk::{contract, contractimpl, Address, Env, String};
 
+#[contracttype]
+#[derive(Clone)]
+pub struct AllowanceValue {
+    pub amount: i128,
+    pub expiration_ledger: u32,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub enum MetadataKey {
+    Name,
+    Symbol,
+    Decimals,
+}
 use admin::require_admin;
 use storage::DataKey::{Admin, Allowance, Balance, Metadata, TotalSupply};
 use storage::MetadataKey::{Decimals, Name, Symbol};
@@ -249,6 +263,14 @@ impl TokenContract {
 impl token::TokenInterface for TokenContract {
     fn allowance(env: Env, from: Address, spender: Address) -> i128 {
         let key = DataKey::Allowance(AllowanceDataKey { from, spender });
+        let val: AllowanceValue = match env.storage().temporary().get(&key) {
+            Some(v) => v,
+            None => return 0,
+        };
+        if env.ledger().sequence() > val.expiration_ledger {
+            return 0;
+        }
+        val.amount
     pub fn allowance(env: Env, from: Address, spender: Address) -> i128 {
         let key = Allowance(AllowanceDataKey { from, spender });
         env.storage().temporary().get(&key).unwrap_or(0)
@@ -266,6 +288,7 @@ impl token::TokenInterface for TokenContract {
             spender: spender.clone(),
         });
 
+        env.storage().temporary().set(&key, &AllowanceValue { amount, expiration_ledger });
         let key = DataKey::Allowance(AllowanceDataKey { from: from.clone(), spender: spender.clone() });
         let key = Allowance(AllowanceDataKey { from: from.clone(), spender: spender.clone() });
         env.storage().temporary().set(&key, &amount);
@@ -301,6 +324,20 @@ impl token::TokenInterface for TokenContract {
 
     fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
         spender.require_auth();
+
+        let key = DataKey::Allowance(AllowanceDataKey {
+            from: from.clone(),
+            spender: spender.clone(),
+        });
+
+        let val: AllowanceValue = env.storage().temporary()
+            .get(&key)
+            .unwrap_or(AllowanceValue { amount: 0, expiration_ledger: 0 });
+
+        if env.ledger().sequence() > val.expiration_ledger {
+            panic!("Allowance expired");
+        }
+        if val.amount < amount {
         let allowance = Self::allowance(env.clone(), from.clone(), spender.clone());
 
         let key = DataKey::Allowance(AllowanceDataKey { from: from.clone(), spender });
@@ -384,6 +421,11 @@ impl token::TokenInterface for TokenContract {
             panic_with_error!(&env, TokenError::InsufficientAllowance);
         }
 
+        // Update allowance
+        env.storage().temporary().set(&key, &AllowanceValue {
+            amount: val.amount - amount,
+            expiration_ledger: val.expiration_ledger,
+        });
         env.storage().temporary().set(&key, &(allowance - amount));
         let balance = Self::balance_of(env.clone(), from.clone());
         env.storage().persistent().set(&DataKey::Balance(from.clone()), &(balance - amount));
