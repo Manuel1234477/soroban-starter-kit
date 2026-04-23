@@ -338,7 +338,7 @@ fn test_invalid_fund_from_funded() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #2)")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn test_invalid_fund_from_delivered() {
     let env = Env::default();
     env.mock_all_auths();
@@ -348,4 +348,110 @@ fn test_invalid_fund_from_delivered() {
 
     // Try to fund when state is Delivered - should fail
     client.fund();
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #8)")]
+fn test_initialize_zero_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let buyer = Address::generate(&env);
+    let seller = Address::generate(&env);
+    let arbiter = Address::generate(&env);
+    let token_contract = setup_token(&env, &buyer, 1000);
+    let deadline = env.ledger().sequence() + 100;
+
+    let (client, _) = create_escrow_contract(&env);
+    
+    // Try to initialize with zero amount - should fail with InvalidAmount
+    client.initialize(&buyer, &seller, &arbiter, &token_contract, &0i128, &deadline);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #8)")]
+fn test_initialize_negative_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let buyer = Address::generate(&env);
+    let seller = Address::generate(&env);
+    let arbiter = Address::generate(&env);
+    let token_contract = setup_token(&env, &buyer, 1000);
+    let deadline = env.ledger().sequence() + 100;
+
+    let (client, _) = create_escrow_contract(&env);
+    
+    // Try to initialize with negative amount - should fail with InvalidAmount
+    client.initialize(&buyer, &seller, &arbiter, &token_contract, &-1i128, &deadline);
+}
+
+#[test]
+fn test_initialize_one_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let buyer = Address::generate(&env);
+    let seller = Address::generate(&env);
+    let arbiter = Address::generate(&env);
+    let token_contract = setup_token(&env, &buyer, 1);
+    let amount = 1i128;
+    let deadline = env.ledger().sequence() + 100;
+
+    let (client, _) = create_escrow_contract(&env);
+    client.initialize(&buyer, &seller, &arbiter, &token_contract, &amount, &deadline);
+
+    let info = client.get_escrow_info();
+    assert_eq!(info.amount, 1i128);
+    assert_eq!(info.state, EscrowState::Created);
+}
+
+#[test]
+fn test_initialize_max_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let buyer = Address::generate(&env);
+    let seller = Address::generate(&env);
+    let arbiter = Address::generate(&env);
+    let token_contract = setup_token(&env, &buyer, i128::MAX);
+    let amount = i128::MAX;
+    let deadline = env.ledger().sequence() + 100;
+
+    let (client, _) = create_escrow_contract(&env);
+    client.initialize(&buyer, &seller, &arbiter, &token_contract, &amount, &deadline);
+
+    let info = client.get_escrow_info();
+    assert_eq!(info.amount, i128::MAX);
+    assert_eq!(info.state, EscrowState::Created);
+}
+
+#[test]
+fn test_release_partial_one_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _, _, _, _, _, amount) = setup_funded_escrow(&env);
+    
+    // Release 1 token
+    client.release_partial(&1i128);
+
+    let info = client.get_escrow_info();
+    assert_eq!(info.amount, amount - 1i128);
+    assert_eq!(info.state, EscrowState::Funded);
+}
+
+#[test]
+fn test_release_partial_zero_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _, _, _, _, _, amount) = setup_funded_escrow(&env);
+    
+    // Release 0 tokens - should succeed but not change amount
+    client.release_partial(&0i128);
+
+    let info = client.get_escrow_info();
+    assert_eq!(info.amount, amount);
+    assert_eq!(info.state, EscrowState::Funded);
 }
