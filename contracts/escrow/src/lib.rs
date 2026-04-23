@@ -156,7 +156,7 @@ impl EscrowContract {
             .instance()
             .get(&State)
             .ok_or(EscrowError::NotInitialized)?;
-        if !matches!(state, EscrowState::Funded | EscrowState::Delivered) {
+        if state != EscrowState::Disputed {
             return Err(EscrowError::InvalidState);
         }
         let arbiter: Address = env.storage().instance().get(&Arbiter).unwrap();
@@ -166,6 +166,31 @@ impl EscrowContract {
         } else {
             Self::refund_to_buyer(env)
         }
+    }
+
+    /// Buyer or seller raises a dispute.
+    pub fn raise_dispute(env: Env) -> Result<(), EscrowError> {
+        Self::require_not_paused(&env)?;
+        let state: EscrowState = env
+            .storage()
+            .instance()
+            .get(&State)
+            .ok_or(EscrowError::NotInitialized)?;
+        if !matches!(state, EscrowState::Funded | EscrowState::Delivered) {
+            return Err(EscrowError::InvalidState);
+        }
+        let buyer: Address = env.storage().instance().get(&Buyer).unwrap();
+        let seller: Address = env.storage().instance().get(&Seller).unwrap();
+        let caller = env.invoker();
+        if caller != buyer && caller != seller {
+            return Err(EscrowError::NotAuthorized);
+        }
+        caller.require_auth();
+        env.storage().instance().set(&State, &EscrowState::Disputed);
+        bump_instance(&env);
+        env.events()
+            .publish((Symbol::new(&env, "dispute_raised"), caller), ());
+        Ok(())
     }
 
     /// Buyer partially releases `amount` tokens to the seller.
