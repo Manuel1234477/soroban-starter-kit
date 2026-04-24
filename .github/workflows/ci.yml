@@ -8,52 +8,48 @@ on:
 
 jobs:
   test:
-    name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
         with:
-          targets: wasm32-unknown-unknown
+          node-version: 20
+          cache: npm
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+      - run: npm ci
 
-      - name: Run tests
-        run: cargo test --workspace
+      - name: Type check
+        run: node node_modules/typescript/bin/tsc --noEmit
 
-  build:
-    name: Build contracts
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
+      - name: Lint (includes JSDoc validation)
+        run: npm run lint
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
+      - name: Documentation coverage check
+        run: npm run docs:check
 
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+      - name: Save documentation report
+        if: always()
+        run: npm run docs:report
 
-      - name: Build all contracts
-        run: |
-          for dir in contracts/*/; do
-            if [ -f "$dir/Cargo.toml" ]; then
-              echo "Building $(basename $dir)..."
-              cargo build --manifest-path "$dir/Cargo.toml" --target wasm32-unknown-unknown --release
-            fi
-            echo "Building $(basename $dir)..."
-            cargo build --manifest-path "$dir/Cargo.toml" --release --target wasm32-unknown-unknown
-            cargo build --manifest-path "$dir/Cargo.toml" --target wasm32-unknown-unknown --release
-          done
-
-      - name: Upload WASM artifacts
+      - name: Upload documentation report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
+          name: docs-report
+          path: docs-report.json
+
+      - name: Run tests with coverage
+        run: node node_modules/vitest/vitest.mjs run --coverage
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+
+      - name: Build
+        run: node node_modules/vite/bin/vite.js build
           name: wasm-contracts
           path: target/wasm32-unknown-unknown/release/*.wasm
           retention-days: 7
